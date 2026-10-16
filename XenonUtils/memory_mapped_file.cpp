@@ -1,5 +1,74 @@
 #include "memory_mapped_file.h"
 
+#if defined(__SWITCH__)
+#include <cstdio>
+#include <fstream>
+
+MemoryMappedFile::MemoryMappedFile() {}
+
+MemoryMappedFile::MemoryMappedFile(const std::filesystem::path &path)
+{
+    open(path);
+}
+
+MemoryMappedFile::~MemoryMappedFile()
+{
+    close();
+}
+
+MemoryMappedFile::MemoryMappedFile(MemoryMappedFile &&other)
+    : fileData(std::move(other.fileData)), opened(other.opened)
+{
+    other.opened = false;
+}
+
+bool MemoryMappedFile::open(const std::filesystem::path &path)
+{
+    close();
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file.is_open())
+    {
+        fprintf(stderr, "open for %s failed.\n", path.string().c_str());
+        return false;
+    }
+    const std::streamoff size = file.tellg();
+    if (size < 0)
+        return false;
+    fileData.resize(size_t(size));
+    file.seekg(0, std::ios::beg);
+    if (!fileData.empty() && !file.read(reinterpret_cast<char *>(fileData.data()), std::streamsize(fileData.size())))
+    {
+        fprintf(stderr, "read for %s failed.\n", path.string().c_str());
+        fileData.clear();
+        return false;
+    }
+    opened = true;
+    return true;
+}
+
+void MemoryMappedFile::close()
+{
+    fileData.clear();
+    opened = false;
+}
+
+bool MemoryMappedFile::isOpen() const
+{
+    return opened;
+}
+
+uint8_t *MemoryMappedFile::data() const
+{
+    return const_cast<uint8_t *>(fileData.data());
+}
+
+size_t MemoryMappedFile::size() const
+{
+    return fileData.size();
+}
+
+#else
+
 #if !defined(_WIN32)
 #   include <cstring>
 #   include <cstdio>
@@ -167,3 +236,5 @@ size_t MemoryMappedFile::size() const
     return static_cast<size_t>(fileSize);
 #endif
 }
+
+#endif

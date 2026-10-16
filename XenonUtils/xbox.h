@@ -241,6 +241,12 @@ typedef struct _XOVERLAPPED {
 
 // this name is so dumb
 typedef struct _XXOVERLAPPED {
+#if defined(__GNUC__) && !defined(__clang__)
+    // GCC refuses members with constructors in an anonymous aggregate, so
+    // only the raw view (as UnleashedRecomp-NX does for the Switch).
+    uint32_t InternalLow;
+    uint32_t InternalHigh;
+#else
     union
     {
         struct
@@ -255,6 +261,7 @@ typedef struct _XXOVERLAPPED {
             uint32_t InternalHigh;
         };
     };
+#endif
     uint32_t InternalContext;
     be<uint32_t> hEvent;
     be<uint32_t> pCompletionRoutine;

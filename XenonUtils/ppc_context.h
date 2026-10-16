@@ -17,6 +17,27 @@
 #include <x86/sse.h>
 #include <x86/sse4.1.h>
 
+// GCC (devkitA64 for the Switch) lacks the Clang builtins the recompiled code
+// uses.
+#if defined(__GNUC__) && !defined(__clang__)
+inline uint32_t PPCRotateLeft32(uint32_t value, uint32_t shift)
+{
+    shift &= 31;
+    return (value << shift) | (value >> ((32 - shift) & 31));
+}
+
+inline uint64_t PPCRotateLeft64(uint64_t value, uint64_t shift)
+{
+    shift &= 63;
+    return (value << shift) | (value >> ((64 - shift) & 63));
+}
+
+#define __builtin_assume(condition) do { if (!(condition)) __builtin_unreachable(); } while (false)
+#define __builtin_debugtrap() __builtin_trap()
+#define __builtin_rotateleft32(value, shift) PPCRotateLeft32(uint32_t(value), uint32_t(shift))
+#define __builtin_rotateleft64(value, shift) PPCRotateLeft64(uint64_t(value), uint64_t(shift))
+#endif
+
 // Saturation bounds for vpkd3d128's 2:10:10:10 pack, as floats in the 3.0+X
 // form (from the ReXGlue SDK, BSD-3, Copyright (c) 2026 Tom Clay).
 constexpr float kPack2101010_Min10 = std::bit_cast<float>(0x403FFE01u);
@@ -700,8 +721,14 @@ inline simde__m128i simde_mm_vsr(simde__m128i a, simde__m128i b)
 inline uint64_t __rdtsc()
 {
     uint64_t ret;
+#if defined(__SWITCH__)
+    // The physical counter, as UnleashedRecomp-NX reads it on the Switch.
+    asm volatile("mrs %0, cntpct_el0\n\t"
+                 : "=r"(ret)::"memory");
+#else
     asm volatile("mrs %0, cntvct_el0\n\t"
                  : "=r"(ret)::"memory");
+#endif
     return ret;
 }
 #elif !defined(__x86_64__) && !defined(_M_X64)
