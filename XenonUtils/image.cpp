@@ -50,6 +50,7 @@ Image ElfLoadImage(const uint8_t* data, size_t size)
 
     Image image{};
     image.size = size;
+    image.dataSize = size;
     image.data = std::make_unique<uint8_t[]>(size);
     image.entry_point = ByteSwap(header->e_entry);
     memcpy(image.data.get(), data, size);

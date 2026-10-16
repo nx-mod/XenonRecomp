@@ -5,6 +5,7 @@
 #error "ppc_config.h must be included before ppc_context.h"
 #endif
 
+#include <bit>
 #include <climits>
 #include <cmath>
 #include <csetjmp>
@@ -15,6 +16,13 @@
 #include <x86/avx.h>
 #include <x86/sse.h>
 #include <x86/sse4.1.h>
+
+// Saturation bounds for vpkd3d128's 2:10:10:10 pack, as floats in the 3.0+X
+// form (from the ReXGlue SDK, BSD-3, Copyright (c) 2026 Tom Clay).
+constexpr float kPack2101010_Min10 = std::bit_cast<float>(0x403FFE01u);
+constexpr float kPack2101010_Max10 = std::bit_cast<float>(0x404001FFu);
+constexpr float kPack2101010_Min2 = std::bit_cast<float>(0x40400000u);
+constexpr float kPack2101010_Max2 = std::bit_cast<float>(0x40400003u);
 
 // SSE3 constants are missing from simde
 #ifndef _MM_DENORMALS_ZERO_MASK

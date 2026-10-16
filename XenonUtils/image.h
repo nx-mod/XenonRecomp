@@ -10,6 +10,7 @@ struct Image
     std::unique_ptr<uint8_t[]> data{};
     size_t base{};
     uint32_t size{};
+    size_t dataSize{};  // bytes in data (the loaded image; at most size)
 
     size_t entry_point{};
     std::set<Section, SectionComparer> sections{};

@@ -712,7 +712,12 @@ bool Recompiler::Recompile(
         break;
 
     case PPC_INST_BLRL:
-        println("__builtin_debugtrap();");
+        // a call to the address in LR, which then holds the return address
+        println("\t{{ const uint32_t target = uint32_t(ctx.lr);");
+        if (!config.skipLr)
+            println("\tctx.lr = 0x{:X};", base + 4);
+        println("\tPPC_CALL_INDIRECT_FUNC(target); }}");
+        csrState = CSRState::Unknown; // the call could change it
         break;
 
     case PPC_INST_BLT:
@@ -801,6 +806,10 @@ bool Recompiler::Recompile(
         break;
 
     case PPC_INST_DCBF:
+        // no op
+        break;
+
+    case PPC_INST_DCBST:
         // no op
         break;
 
@@ -980,6 +989,11 @@ bool Recompiler::Recompile(
         println("\t{}.f64 = double(float(-({}.f64 * {}.f64 - {}.f64)));", f(insn.operands[0]), f(insn.operands[1]), f(insn.operands[2]), f(insn.operands[3]));
         break;
 
+    case PPC_INST_FRSQRTE:
+        printSetFlushMode(false);
+        println("\t{}.f64 = 1.0 / sqrt({}.f64);", f(insn.operands[0]), f(insn.operands[1]));
+        break;
+
     case PPC_INST_FRES:
         printSetFlushMode(false);
         println("\t{}.f64 = float(1.0 / {}.f64);", f(insn.operands[0]), f(insn.operands[1]));
@@ -1137,6 +1151,8 @@ bool Recompiler::Recompile(
     case PPC_INST_LVEWX128:
     case PPC_INST_LVX:
     case PPC_INST_LVX128:
+    case PPC_INST_LVXL:
+    case PPC_INST_LVXL128:
         // NOTE: for endian swapping, we reverse the whole vector instead of individual elements.
         // this is accounted for in every instruction (eg. dp3 sums yzw instead of xyz)
         print("\tsimde_mm_store_si128((simde__m128i*){}.u8, simde_mm_shuffle_epi8(simde_mm_load_si128((simde__m128i*)(base + ((", v(insn.operands[0]));
@@ -1196,6 +1212,13 @@ bool Recompiler::Recompile(
 
     case PPC_INST_LWAX:
         print("\t{}.s64 = int32_t(PPC_LOAD_U32(", r(insn.operands[0]));
+        if (insn.operands[1] != 0)
+            print("{}.u32 + ", r(insn.operands[1]));
+        println("{}.u32));", r(insn.operands[2]));
+        break;
+
+    case PPC_INST_LHBRX:
+        print("\t{}.u64 = __builtin_bswap16(PPC_LOAD_U16(", r(insn.operands[0]));
         if (insn.operands[1] != 0)
             print("{}.u32 + ", r(insn.operands[1]));
         println("{}.u32));", r(insn.operands[2]));
@@ -1305,6 +1328,12 @@ bool Recompiler::Recompile(
         println("\t{}.s64 = (int64_t({}.s32) * int64_t({}.s32)) >> 32;", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
         break;
 
+    case PPC_INST_MULHDU:
+        println("\t{}.u64 = uint64_t((unsigned __int128)({}.u64) * {}.u64 >> 64);", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
+        if (strchr(insn.opcode->name, '.'))
+            println("\t{}.compare<int64_t>({}.s64, 0, {});", cr(0), r(insn.operands[0]), xer());
+        break;
+
     case PPC_INST_MULHWU:
         println("\t{}.u64 = (uint64_t({}.u32) * uint64_t({}.u32)) >> 32;", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
         if (strchr(insn.opcode->name, '.'))
@@ -1321,6 +1350,12 @@ bool Recompiler::Recompile(
 
     case PPC_INST_MULLW:
         println("\t{}.s64 = int64_t({}.s32) * int64_t({}.s32);", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
+        if (strchr(insn.opcode->name, '.'))
+            println("\t{}.compare<int32_t>({}.s32, 0, {});", cr(0), r(insn.operands[0]), xer());
+        break;
+
+    case PPC_INST_EQV:
+        println("\t{}.u64 = ~({}.u64 ^ {}.u64);", r(insn.operands[0]), r(insn.operands[1]), r(insn.operands[2]));
         if (strchr(insn.opcode->name, '.'))
             println("\t{}.compare<int32_t>({}.s32, 0, {});", cr(0), r(insn.operands[0]), xer());
         break;
@@ -1609,6 +1644,8 @@ bool Recompiler::Recompile(
 
     case PPC_INST_STVLX:
     case PPC_INST_STVLX128:
+    case PPC_INST_STVLXL:
+    case PPC_INST_STVLXL128:
         // TODO: vectorize
         // NOTE: accounting for the full vector reversal here
         print("\t{} = ", ea());
@@ -1769,6 +1806,7 @@ bool Recompiler::Recompile(
         println("\tsimde_mm_store_si128((simde__m128i*){}.u8, simde_mm_and_si128(simde_mm_load_si128((simde__m128i*){}.u8), simde_mm_load_si128((simde__m128i*){}.u8)));", v(insn.operands[0]), v(insn.operands[1]), v(insn.operands[2]));
         break;
 
+    case PPC_INST_VANDC:
     case PPC_INST_VANDC128:
         println("\tsimde_mm_store_si128((simde__m128i*){}.u8, simde_mm_andnot_si128(simde_mm_load_si128((simde__m128i*){}.u8), simde_mm_load_si128((simde__m128i*){}.u8)));", v(insn.operands[0]), v(insn.operands[2]), v(insn.operands[1]));
         break;
@@ -1783,6 +1821,16 @@ bool Recompiler::Recompile(
 
     case PPC_INST_VAVGUB:
         println("\tsimde_mm_store_si128((simde__m128i*){}.u8, simde_mm_avg_epu8(simde_mm_load_si128((simde__m128i*){}.u8), simde_mm_load_si128((simde__m128i*){}.u8)));", v(insn.operands[0]), v(insn.operands[1]), v(insn.operands[2]));
+        break;
+
+    case PPC_INST_VCTUXS:
+        // NaN and negatives give 0, anything past the range 0xFFFFFFFF
+        printSetFlushMode(true);
+        for (size_t i = 0; i < 4; i++)
+        {
+            println("\t{{ const float x = {}.f32[{}] * {}.0f;", v(insn.operands[1]), i, 1u << insn.operands[2]);
+            println("\t  {}.u32[{}] = !(x > 0.0f) ? 0u : (x >= 4294967296.0f ? 0xFFFFFFFFu : uint32_t(x)); }}", v(insn.operands[0]), i);
+        }
         break;
 
     case PPC_INST_VCTSXS:
@@ -2036,10 +2084,95 @@ bool Recompiler::Recompile(
             }
             break;
 
+        case 2:  // NORMPACKED32 - pack 4 floats (in 3.0+X form) to 2:10:10:10 format (w:x:y:z)
+        {
+            // Format: 2 bits for w (element 3), 10 bits each for x, y, z (elements 0, 1, 2)
+            // Input floats are in 3.0+X form where X is the integer to pack
+            // Algorithm: saturate float to range, then mask low bits to extract X
+            // Constants kPack2101010_* are defined in ppc/context.h
+            println("\t{}.u32[0] = 0;", vTemp());
+
+            // Pack x (10 bits, position 0-9) - Guest element 0 is at index 3
+            println(
+                    "\t{}.f32 = {}.f32[3] < kPack2101010_Min10 ? kPack2101010_Min10 : ({}.f32[3] > "
+                    "kPack2101010_Max10 ? kPack2101010_Max10 : {}.f32[3]);",
+                    temp(), v(insn.operands[1]), v(insn.operands[1]),
+                    v(insn.operands[1]));
+            println("\t{}.u32[0] = {}.u32 & 0x3FF;", vTemp(), temp());
+
+            // Pack y (10 bits, position 10-19) - Guest element 1 is at index 2
+            println(
+                    "\t{}.f32 = {}.f32[2] < kPack2101010_Min10 ? kPack2101010_Min10 : ({}.f32[2] > "
+                    "kPack2101010_Max10 ? kPack2101010_Max10 : {}.f32[2]);",
+                    temp(), v(insn.operands[1]), v(insn.operands[1]),
+                    v(insn.operands[1]));
+            println("\t{}.u32[0] |= ({}.u32 & 0x3FF) << 10;", vTemp(), temp());
+
+            // Pack z (10 bits, position 20-29) - Guest element 2 is at index 1
+            println(
+                    "\t{}.f32 = {}.f32[1] < kPack2101010_Min10 ? kPack2101010_Min10 : ({}.f32[1] > "
+                    "kPack2101010_Max10 ? kPack2101010_Max10 : {}.f32[1]);",
+                    temp(), v(insn.operands[1]), v(insn.operands[1]),
+                    v(insn.operands[1]));
+            println("\t{}.u32[0] |= ({}.u32 & 0x3FF) << 20;", vTemp(), temp());
+
+            // Pack w (2 bits, position 30-31) - Guest element 3 is at index 0
+            println(
+                    "\t{}.f32 = {}.f32[0] < kPack2101010_Min2 ? kPack2101010_Min2 : ({}.f32[0] > "
+                    "kPack2101010_Max2 ? kPack2101010_Max2 : {}.f32[0]);",
+                    temp(), v(insn.operands[1]), v(insn.operands[1]),
+                    v(insn.operands[1]));
+            println("\t{}.u32[0] |= ({}.u32 & 0x3) << 30;", vTemp(), temp());
+
+            println("\t{}.u32[{}] = {}.u32[0];", v(insn.operands[0]), insn.operands[4],
+                                    vTemp());
+            break;
+        }
+
+        case 3:  // FLOAT16_2 - pack 2 floats to 2 float16s
+        {
+            // Pack 2 elements into 32 bits (1 word)
+            // Guest element 0 goes to high 16 bits, element 1 to low 16 bits
+            // Output u16 index = (1-i) + 2*shift for element i
+            for (size_t i = 0; i < 2; i++) {
+                size_t srcIdx = 3 - i;  // Guest element i is at host array index 3-i
+                size_t dstIdx =
+                        (1 - i) + (2 * insn.operands[4]);  // Output reversed: elem 0 to high, elem 1 to low
+                println("\t{}.u32 = ({}.u32[{}]&0x7FFFFFFF);", temp(), v(insn.operands[1]),
+                                        srcIdx);
+                println(
+                        "\t{0}.u8[0] = ({1}.f32 != {1}.f32) || ({1}.f32 > 65504.0f) ? 0xFF : "
+                        "(({2}.u32[{3}]&0x7f800000)>>23);",
+                        vTemp(), temp(), v(insn.operands[1]), srcIdx);
+                println("\t{}.u16 = {}.u8[0] != 0xFF ? (({}.u32[{}]&0x7FE000)>>13) : 0x0;", temp(),
+                                        vTemp(), v(insn.operands[1]), srcIdx);
+                println(
+                        "\t{0}.u16[{1}] = {2}.u8[0] != 0xFF ? ({2}.u8[0] > 0x70 ? "
+                        "((({2}.u8[0]-0x70)<<10)+{3}.u16) : (0x71-{2}.u8[0] > 31 ? 0x0 : "
+                        "((0x400+{3}.u16)>>(0x71-{2}.u8[0])))) : 0x7FFF;",
+                        v(insn.operands[0]), dstIdx, vTemp(), temp());
+                println("\t{}.u16[{}] |= (({}.u32[{}]&0x80000000)>>16);", v(insn.operands[0]),
+                                        dstIdx, v(insn.operands[1]), srcIdx);
+            }
+            break;
+        }
+
         default:
             println("\t__builtin_debugtrap();");
             break;
         }
+        break;
+
+    case PPC_INST_VPKSWSS:
+        // (operands swapped: vectors are stored reversed, as for vpkshus)
+        println("\tsimde_mm_store_si128((simde__m128i*){}.u8, simde_mm_packs_epi32(simde_mm_load_si128((simde__m128i*){}.s32), simde_mm_load_si128((simde__m128i*){}.s32)));", v(insn.operands[0]), v(insn.operands[2]), v(insn.operands[1]));
+        break;
+
+    case PPC_INST_VPKUWUS:
+        // unsigned words clamped to 0xFFFF, then packed (they are non-negative as signed)
+        println("\tsimde_mm_store_si128((simde__m128i*){}.u8, simde_mm_packus_epi32("
+                "simde_mm_min_epu32(simde_mm_load_si128((simde__m128i*){}.u32), simde_mm_set1_epi32(0xFFFF)), "
+                "simde_mm_min_epu32(simde_mm_load_si128((simde__m128i*){}.u32), simde_mm_set1_epi32(0xFFFF))));", v(insn.operands[0]), v(insn.operands[2]), v(insn.operands[1]));
         break;
 
     case PPC_INST_VPKSHUS:
@@ -2088,6 +2221,7 @@ bool Recompiler::Recompile(
         break;
 
     case PPC_INST_VSEL:
+    case PPC_INST_VSEL128:
         println("\tsimde_mm_store_si128((simde__m128i*){}.u8, simde_mm_or_si128(simde_mm_andnot_si128(simde_mm_load_si128((simde__m128i*){}.u8), simde_mm_load_si128((simde__m128i*){}.u8)), simde_mm_and_si128(simde_mm_load_si128((simde__m128i*){}.u8), simde_mm_load_si128((simde__m128i*){}.u8))));", v(insn.operands[0]), v(insn.operands[3]), v(insn.operands[1]), v(insn.operands[3]), v(insn.operands[2]));
         break;
 
@@ -2211,6 +2345,97 @@ bool Recompiler::Recompile(
             println("\t{}.f32[0] = 1.0f;", vTemp());
             println("\t{} = {};", v(insn.operands[0]), vTemp());
             break;
+
+        // (formats 2-5 here and 2-3 in vpkd3d128 ported from the ReXGlue SDK,
+        // BSD-3, Copyright (c) 2026 Tom Clay)
+        case 2:  // NORMPACKED32 - unpack 2:10:10:10 to floats
+        {
+            // Format: w(2 bits):z(10 bits):y(10 bits):x(10 bits) in Guest element 3 (host s32[0])
+            // x, y, z --> 3.0+X form (signed 10-bit), w --> 1.0+w form
+            // Output: x --> Guest element 0 (host u32[3]), y --> Guest element 1 (host u32[2]),
+            //         z --> Guest element 2 (host u32[1]), w --> Guest element 3 (host u32[0])
+            auto vSrc = v(insn.operands[1]);
+            auto vDst = v(insn.operands[0]);
+            // x (bits 0-9) - sign extend from 10 bits --> Guest element 0 (host u32[3])
+            println("\t{}.s32 = ({}.s32[0] << 22) >> 22;", temp(), vSrc);
+            println("\t{}.s32[0] = {}.s32 == -512 ? 0x7FC00000 : ({}.s32 + 0x40400000);",
+                                    vTemp(), temp(), temp());
+            println("\t{}.u32[3] = {}.u32[0];", vDst, vTemp());
+            // y (bits 10-19) - sign extend from 10 bits --> Guest element 1 (host u32[2])
+            println("\t{}.s32 = ({}.s32[0] << 12) >> 22;", temp(), vSrc);
+            println("\t{}.s32[0] = {}.s32 + 0x40400000;", vTemp(), temp());
+            println("\t{}.u32[2] = {}.u32[0];", vDst, vTemp());
+            // z (bits 20-29) - sign extend from 10 bits --> Guest element 2 (host u32[1])
+            println("\t{}.s32 = ({}.s32[0] << 2) >> 22;", temp(), vSrc);
+            println("\t{}.s32[0] = {}.s32 + 0x40400000;", vTemp(), temp());
+            println("\t{}.u32[1] = {}.u32[0];", vDst, vTemp());
+            // w (bits 30-31) - 2 bits, convert to 1.0+w form --> Guest element 3 (host u32[0])
+            println("\t{}.u32[0] = ({}.u32[0] >> 30) | 0x3F800000;", vTemp(), vSrc);
+            println("\t{}.u32[0] = {}.u32[0];", vDst, vTemp());
+            break;
+        }
+
+        case 3:  // FLOAT16_2 - unpack 2 float16 to floats
+        {
+            auto vSrc = v(insn.operands[1]);
+            auto vDst = v(insn.operands[0]);
+            // Unpack 2 float16s from u16[0,1] to elements 0,1 (stored at u32[3,2])
+            // Element 0 (at u32[3]) from u16[1] (high), element 1 (at u32[2]) from u16[0] (low)
+            for (size_t i = 0; i < 2; i++) {
+                size_t srcIdx = 1 - i;  // Read from u16[1], u16[0]
+                size_t dstIdx = 3 - i;  // Write to u32[3], u32[2]
+                println("\t{}.u32 = {}.u16[{}];", temp(), vSrc, srcIdx);
+                // Extract sign, exponent, mantissa
+                println(
+                        "\t{}.u32[0] = (({}.u32 & 0x8000) << 16) | ((({}.u32 & 0x7C00) + 0x1C000) << 13) | "
+                        "(({}.u32 & 0x03FF) << 13);",
+                        vTemp(), temp(), temp(), temp());
+                // Handle zero/denorm case
+                println("\tif (({}.u32 & 0x7C00) == 0) {}.u32[0] = ({}.u32 & 0x8000) << 16;",
+                                        temp(), vTemp(), temp());
+                println("\t{}.u32[{}] = {}.u32[0];", vDst, dstIdx, vTemp());
+            }
+            println("\t{}.f32[1] = 0.0f;", vDst);
+            println("\t{}.f32[0] = 1.0f;", vDst);
+            break;
+        }
+
+        case 4:  // NORMSHORT4 - unpack 4 shorts to floats (3.0+X form)
+        {
+            // Unpack 4 shorts from Guest elements 2-3 (host u16[0-3]) to 4 floats
+            // Guest element order is reversed in host arrays
+            for (size_t i = 0; i < 4; i++) {
+                size_t srcIdx = 3 - i;  // Read from u16 indices 3, 2, 1, 0 (guest shorts 0, 1, 2, 3)
+                size_t dstIdx = 3 - i;  // Write to f32 indices 3, 2, 1, 0 (Guest elements 0, 1, 2, 3)
+                println("\t{}.f32 = 3.0f;", temp());
+                println("\t{}.s32 += {}.s16[{}];", temp(), v(insn.operands[1]), srcIdx);
+                println("\t{}.f32[{}] = {}.f32;", v(insn.operands[0]), dstIdx, temp());
+            }
+            break;
+        }
+
+        case 5:  // FLOAT16_4 - unpack 4 float16 to floats
+        {
+            auto vSrc = v(insn.operands[1]);
+            auto vDst = v(insn.operands[0]);
+            // Unpack 4 float16s from Guest elements 2-3 (host u16[0-3]) to elements 0-3
+            // Guest element order is reversed in host arrays
+            for (size_t i = 0; i < 4; i++) {
+                size_t srcIdx = 3 - i;  // Read from u16 indices 3, 2, 1, 0 (guest shorts 0, 1, 2, 3)
+                size_t dstIdx = 3 - i;  // Write to u32 indices 3, 2, 1, 0 (Guest elements 0, 1, 2, 3)
+                println("\t{}.u32 = {}.u16[{}];", temp(), vSrc, srcIdx);
+                // Extract sign, exponent, mantissa and convert to float32
+                println(
+                        "\t{}.u32[0] = (({}.u32 & 0x8000) << 16) | ((({}.u32 & 0x7C00) + 0x1C000) << 13) | "
+                        "(({}.u32 & 0x03FF) << 13);",
+                        vTemp(), temp(), temp(), temp());
+                // Handle zero/denorm case
+                println("\tif (({}.u32 & 0x7C00) == 0) {}.u32[0] = ({}.u32 & 0x8000) << 16;",
+                                        temp(), vTemp(), temp());
+                println("\t{}.u32[{}] = {}.u32[0];", vDst, dstIdx, vTemp());
+            }
+            break;
+        }
 
         default:
             println("\t__builtin_debugtrap();");

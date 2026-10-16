@@ -259,6 +259,7 @@ Image Xex2LoadImage(const uint8_t* data, size_t dataSize)
 
     image.data = std::move(result);
     image.size = security->imageSize;
+    image.dataSize = security->imageSize;  // every path above allocates imageSize
 
     // Map image
     const auto* dosHeader = reinterpret_cast<IMAGE_DOS_HEADER*>(image.data.get());
