@@ -609,7 +609,12 @@ bool Recompiler::Recompile(
     case PPC_INST_BCTR:
         if (switchTable != config.switchTables.end())
         {
-            println("\tswitch ({}.u64) {{", r(switchTable->second.r));
+            // The low word: the guard before the table (cmplwi) checks only
+            // that, and so does the table index (rlwinm). The full register
+            // can hold more (addi on a sign-extended load), and a value past
+            // the cases reaches __builtin_unreachable, which GCC compiles to
+            // anything at all.
+            println("\tswitch ({}.u32) {{", r(switchTable->second.r));
 
             for (size_t i = 0; i < switchTable->second.labels.size(); i++)
             {
