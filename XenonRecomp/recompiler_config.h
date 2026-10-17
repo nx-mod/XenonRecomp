@@ -30,6 +30,10 @@ struct RecompilerConfig
     std::string patchedFilePath;
     std::string outDirectoryPath;
     std::string switchTableFilePath;
+    // Prepended to the names an image shares with every other (the entry
+    // point and the register save/restore helpers), so several images can
+    // link into one program.
+    std::string symbolPrefix;
     std::unordered_map<uint32_t, RecompilerSwitchTable> switchTables;
     bool skipLr = false;
     bool ctrAsLocalVariable = false;

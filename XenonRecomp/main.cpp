@@ -33,6 +33,15 @@ int main(int argc, char* argv[])
             entry->name = "_xstart";
         }
 
+        if (!recompiler.config.symbolPrefix.empty())
+        {
+            for (auto& symbol : recompiler.image.symbols)
+            {
+                if (symbol.name == "_xstart" || symbol.name.starts_with("__save") || symbol.name.starts_with("__rest"))
+                    symbol.name = recompiler.config.symbolPrefix + symbol.name;
+            }
+        }
+
         const char* headerFilePath =
 #ifdef XENON_RECOMP_HEADER_FILE_PATH
             XENON_RECOMP_HEADER_FILE_PATH
