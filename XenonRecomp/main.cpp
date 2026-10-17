@@ -37,7 +37,7 @@ int main(int argc, char* argv[])
         {
             for (auto& symbol : recompiler.image.symbols)
             {
-                if (symbol.name == "_xstart" || symbol.name.starts_with("__save") || symbol.name.starts_with("__rest"))
+                if (symbol.name == "_xstart" || symbol.name.rfind("__save", 0) == 0 || symbol.name.rfind("__rest", 0) == 0)
                     symbol.name = recompiler.config.symbolPrefix + symbol.name;
             }
         }

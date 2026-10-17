@@ -1,4 +1,6 @@
 #include "xex.h"
+#include <cctype>
+#include <string>
 #include "image.h"
 #include <cassert>
 #include <cstring>
@@ -338,6 +340,21 @@ Image Xex2LoadImage(const uint8_t* data, size_t dataSize)
                     if (name != names->end())
                     {
                         image.symbols.insert({ name->second, descriptors[im].firstThunk, sizeof(thunk), Symbol_Function });
+                    }
+                    else if (names == &DummyExports)
+                    {
+                        // An import from another DLL: __imp__<library>_<ordinal>, for the
+                        // runtime to resolve through the loaded module's exports. Without a
+                        // symbol, the thunk is recompiled as the empty stub above and every
+                        // call through it does nothing.
+                        std::string library(stringTable[i]);
+                        for (char& c : library)
+                        {
+                            if (!isalnum(static_cast<unsigned char>(c)))
+                                c = '_';
+                        }
+                        image.symbols.insert({ "__imp__" + library + "_" + std::to_string(originalData->originalData.ordinal),
+                            descriptors[im].firstThunk, sizeof(thunk), Symbol_Function });
                     }
 
                     memcpy(originalThunk, thunk, sizeof(thunk));
