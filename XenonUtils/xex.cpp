@@ -1,4 +1,11 @@
 #include "xex.h"
+#ifdef __SWITCH__
+extern "C"
+{
+#include <switch/types.h>
+#include <switch/crypto/aes_cbc.h>
+}
+#endif
 #include <cctype>
 #include <string>
 #include "image.h"
@@ -147,17 +154,29 @@ Image Xex2LoadImage(const uint8_t* data, size_t dataSize)
         if (fileFormatInfo->encryptionType == XEX_ENCRYPTION_NORMAL)
         {
             constexpr uint32_t KeySize = 16;
-            AES_ctx aesContext;
-
             uint8_t decryptedKey[KeySize];
+            const size_t encryptedSize = dataSize - header->headerSize;
+            decryptedData = std::make_unique<uint8_t[]>(encryptedSize);
+#ifdef __SWITCH__
+            // libnx's AES uses the CPU's AES instructions: tiny-AES took
+            // seconds over a 20 MB executable on every start.
+            Aes128CbcContext cbc;
+            aes128CbcContextCreate(&cbc, Xex2RetailKey, AESBlankIV, false);
+            aes128CbcDecrypt(&cbc, decryptedKey, security->aesKey, KeySize);
+            aes128CbcContextCreate(&cbc, decryptedKey, AESBlankIV, false);
+            const size_t whole = encryptedSize & ~size_t(15);
+            aes128CbcDecrypt(&cbc, decryptedData.get(), data + header->headerSize, whole);
+            memcpy(decryptedData.get() + whole, data + header->headerSize + whole, encryptedSize - whole);
+#else
+            AES_ctx aesContext;
             memcpy(decryptedKey, security->aesKey, KeySize);
             AES_init_ctx_iv(&aesContext, Xex2RetailKey, AESBlankIV);
             AES_CBC_decrypt_buffer(&aesContext, decryptedKey, KeySize);
 
-            decryptedData = std::make_unique<uint8_t[]>(dataSize - header->headerSize);
-            memcpy(decryptedData.get(), data + header->headerSize, dataSize - header->headerSize);
+            memcpy(decryptedData.get(), data + header->headerSize, encryptedSize);
             AES_init_ctx_iv(&aesContext, decryptedKey, AESBlankIV);
-            AES_CBC_decrypt_buffer(&aesContext, decryptedData.get(), dataSize - header->headerSize);
+            AES_CBC_decrypt_buffer(&aesContext, decryptedData.get(), encryptedSize);
+#endif
 
             srcData = decryptedData.get();
         }
